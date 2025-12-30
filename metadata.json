@@ -1,0 +1,5 @@
+{
+  "name": "Secret AI Puppet",
+  "description": "A dual-interface chat application where you act as the AI behind the curtain, responding to 'user' messages in real-time while they believe they're interacting with a machine.",
+  "requestFramePermissions": []
+}
