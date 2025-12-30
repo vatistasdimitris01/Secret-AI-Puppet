@@ -28,8 +28,10 @@ const PuppeteerPanel: React.FC<PuppeteerPanelProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   
   const sessionList = Object.values(sessions).sort((a, b) => {
-    if (a.status !== b.status) return a.status === 'online' ? -1 : 1;
-    return b.lastActive - a.lastActive;
+    const aStatus = a.status || 'offline';
+    const bStatus = b.status || 'offline';
+    if (aStatus !== bStatus) return aStatus === 'online' ? -1 : 1;
+    return (b.lastActive || 0) - (a.lastActive || 0);
   });
   
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
@@ -111,19 +113,19 @@ const PuppeteerPanel: React.FC<PuppeteerPanelProps> = ({
               <div className="flex justify-between items-start mb-3">
                 <div className="flex flex-col">
                   <span className={`text-[11px] font-bold tracking-tight mb-0.5 ${activeSessionId === s.id ? 'text-rose-400' : 'text-slate-200'}`}>
-                    {s.userName}
+                    {s.userName || 'Anonymous'}
                   </span>
                   <span className="text-[9px] font-mono text-slate-600">{s.id}</span>
                 </div>
-                <div className={`px-2 py-0.5 rounded text-[8px] font-black tracking-widest ${s.status === 'online' ? 'bg-emerald-500/20 text-emerald-400 animate-pulse' : 'bg-slate-800 text-slate-500'}`}>
-                  {s.status.toUpperCase()}
+                <div className={`px-2 py-0.5 rounded text-[8px] font-black tracking-widest ${(s.status || 'offline') === 'online' ? 'bg-emerald-500/20 text-emerald-400 animate-pulse' : 'bg-slate-800 text-slate-500'}`}>
+                  {(s.status || 'offline').toUpperCase()}
                 </div>
               </div>
 
               <div className="space-y-1 mb-4">
                 <p className="text-[9px] text-slate-500 font-mono truncate bg-black/20 p-1 px-2 rounded">{s.deviceInfo || 'Unknown Node'}</p>
                 <div className="flex gap-2 text-[8px] font-mono text-slate-600">
-                  <span>START: {new Date(s.startTime).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                  <span>START: {new Date(s.startTime || Date.now()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                   {s.disconnectedAt && (
                     <span className="text-rose-500/60">LEFT: {new Date(s.disconnectedAt).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                   )}
@@ -131,11 +133,11 @@ const PuppeteerPanel: React.FC<PuppeteerPanelProps> = ({
               </div>
 
               <div className="text-[10px] text-slate-400 italic truncate opacity-60">
-                {s.messages[s.messages.length - 1]?.content || '---'}
+                {s.messages && s.messages.length > 0 ? s.messages[s.messages.length - 1].content : '---'}
               </div>
               
               <div className="mt-4 pt-4 border-t border-white/5 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-all transform translate-y-1 group-hover:translate-y-0">
-                <span className="text-[9px] font-bold text-slate-600">MSG_COUNT: {s.messages.length}</span>
+                <span className="text-[9px] font-bold text-slate-600">MSG_COUNT: {s.messages ? s.messages.length : 0}</span>
                 <button onClick={(e) => { e.stopPropagation(); onPurgeSession(s.id); }} className="text-[9px] font-black text-rose-500/80 hover:text-rose-400 tracking-tighter">TERMINATE_LOG</button>
               </div>
             </div>
@@ -163,11 +165,11 @@ const PuppeteerPanel: React.FC<PuppeteerPanelProps> = ({
             <header className="h-24 border-b border-white/5 bg-[#111218]/90 backdrop-blur-3xl px-10 flex items-center justify-between z-10">
               <div className="flex items-center gap-8">
                 <div>
-                  <h2 className="text-sm font-black text-white tracking-widest mb-1">INTERCEPTING: <span className="text-rose-500">{activeSession.userName.toUpperCase()}</span></h2>
+                  <h2 className="text-sm font-black text-white tracking-widest mb-1">INTERCEPTING: <span className="text-rose-500">{(activeSession.userName || 'Anonymous').toUpperCase()}</span></h2>
                   <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${activeSession.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-700'}`}></span>
+                    <span className={`w-2 h-2 rounded-full ${(activeSession.status || 'offline') === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-700'}`}></span>
                     <span className="text-[10px] text-slate-500 font-mono tracking-tighter uppercase">
-                      {activeSession.status === 'online' ? 'Synchronized' : `Signal Lost (Last seen: ${new Date(activeSession.lastActive).toLocaleTimeString()})`}
+                      {(activeSession.status || 'offline') === 'online' ? 'Synchronized' : `Signal Lost (Last seen: ${new Date(activeSession.lastActive || Date.now()).toLocaleTimeString()})`}
                     </span>
                   </div>
                 </div>
@@ -175,7 +177,7 @@ const PuppeteerPanel: React.FC<PuppeteerPanelProps> = ({
                 <div className="max-w-md">
                    <span className="text-[10px] text-slate-700 uppercase font-black block mb-1 tracking-widest">Real-time Buffer:</span>
                    <p className="text-sm text-emerald-400/90 font-mono truncate italic h-6 min-w-[200px] bg-black/20 px-3 py-0.5 rounded-lg border border-white/5">
-                     {activeSession.isUserTyping ? activeSession.userDraft : (activeSession.status === 'online' ? <span className="opacity-20">_listening_</span> : 'N/A')}
+                     {activeSession.isUserTyping ? activeSession.userDraft : ((activeSession.status || 'offline') === 'online' ? <span className="opacity-20">_listening_</span> : 'N/A')}
                    </p>
                 </div>
               </div>
@@ -201,7 +203,7 @@ const PuppeteerPanel: React.FC<PuppeteerPanelProps> = ({
 
             {/* Neural Log history */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-12 space-y-12 hide-scrollbar bg-[radial-gradient(circle_at_50%_0%,rgba(18,20,28,1)_0%,rgba(12,13,16,1)_100%)]">
-              {activeSession.messages.map(m => (
+              {activeSession.messages && activeSession.messages.map(m => (
                 <div key={m.id} className={`flex flex-col ${m.role === Role.USER ? 'items-start' : 'items-end'} animate-in fade-in duration-500`}>
                   <div className="flex items-center gap-4 mb-3 px-4">
                     <span className={`text-[10px] font-black uppercase tracking-[0.2em] ${m.role === Role.USER ? 'text-blue-500/80' : 'text-rose-500/80'}`}>
