@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Role, Message, SessionState, GlobalChatState, ChatEvent } from './types';
+import { Role, Message, SessionState, ChatEvent } from './types';
 import UserView from './components/UserView';
 import PuppeteerPanel from './components/PuppeteerPanel';
 
@@ -10,7 +10,7 @@ const syncChannel = new BroadcastChannel('ai_puppet_v2');
 const getLocalSessionId = () => {
   let id = localStorage.getItem('my_session_id');
   if (!id) {
-    id = 'target_' + Math.random().toString(36).substr(2, 5);
+    id = 'U-' + Math.random().toString(36).substr(2, 4).toUpperCase();
     localStorage.setItem('my_session_id', id);
   }
   return id;
@@ -26,7 +26,7 @@ const App: React.FC = () => {
   const [route, setRoute] = useState<string>(window.location.hash || '#/user');
   const mySessionId = useMemo(() => getLocalSessionId(), []);
 
-  // Update localStorage and broadcast changes
+  // Persist sessions and broadcast changes
   useEffect(() => {
     localStorage.setItem('puppet_sessions', JSON.stringify(sessions));
   }, [sessions]);
@@ -41,7 +41,7 @@ const App: React.FC = () => {
         const next = { ...prev };
         const session = next[ev.sessionId] || {
           id: ev.sessionId,
-          messages: [],
+          messages: [{ id: 'init', role: Role.AI, content: "Hello! I am Gemini 4.0. How can I assist you today?", timestamp: Date.now() }],
           isThinking: false,
           isUserTyping: false,
           userDraft: '',
@@ -83,26 +83,30 @@ const App: React.FC = () => {
 
     syncChannel.onmessage = handleSync;
     
-    // Announce presence if we are a user
-    if (route.startsWith('#/user')) {
-      syncChannel.postMessage({ type: 'USER_JOINED', sessionId: mySessionId });
-    }
+    // Auto-announce on mount
+    syncChannel.postMessage({ type: 'USER_JOINED', sessionId: mySessionId });
 
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
       syncChannel.onmessage = null;
     };
-  }, [route, mySessionId]);
+  }, [mySessionId]);
 
-  // User Actions
+  // User Actions (The "User Portal")
   const handleUserSendMessage = useCallback((text: string) => {
     const msg: Message = { id: Date.now().toString(), role: Role.USER, content: text, timestamp: Date.now() };
-    const ev: ChatEvent = { type: 'USER_MESSAGE', sessionId: mySessionId, message: msg };
-    syncChannel.postMessage(ev);
-    // Local update for immediate feedback
+    syncChannel.postMessage({ type: 'USER_MESSAGE', sessionId: mySessionId, message: msg });
+    
+    // Local state update for immediate UI feedback
     setSessions(prev => ({
       ...prev,
-      [mySessionId]: { ...prev[mySessionId], messages: [...(prev[mySessionId]?.messages || []), msg], userDraft: '', isUserTyping: false }
+      [mySessionId]: { 
+        ...prev[mySessionId], 
+        messages: [...(prev[mySessionId]?.messages || []), msg], 
+        userDraft: '', 
+        isUserTyping: false,
+        lastActive: Date.now()
+      }
     }));
   }, [mySessionId]);
 
@@ -110,19 +114,34 @@ const App: React.FC = () => {
     syncChannel.postMessage({ type: 'USER_TYPING', sessionId: mySessionId, text });
   }, [mySessionId]);
 
-  // Operator Actions
+  // Operator Actions (The "AI Portal")
   const handleOperatorSend = useCallback((sessionId: string, text: string) => {
     const msg: Message = { id: Date.now().toString(), role: Role.AI, content: text, timestamp: Date.now() };
     syncChannel.postMessage({ type: 'AI_MESSAGE', sessionId, message: msg });
+    
+    setSessions(prev => ({
+      ...prev,
+      [sessionId]: { ...prev[sessionId], messages: [...(prev[sessionId]?.messages || []), msg], isThinking: false, lastActive: Date.now() }
+    }));
   }, []);
 
   const handleOperatorThinking = useCallback((sessionId: string, thinking: boolean) => {
     syncChannel.postMessage({ type: 'AI_THINKING', sessionId, thinking });
+    setSessions(prev => ({
+      ...prev,
+      [sessionId]: { ...prev[sessionId], isThinking: thinking }
+    }));
   }, []);
 
   const handlePurge = useCallback((sessionId: string) => {
     syncChannel.postMessage({ type: 'SESSION_PURGE', sessionId });
-  }, []);
+    setSessions(prev => {
+      const next = { ...prev };
+      delete next[sessionId];
+      return next;
+    });
+    if (activeSessionId === sessionId) setActiveSessionId(null);
+  }, [activeSessionId]);
 
   if (route === '#/control') {
     return (
@@ -137,8 +156,8 @@ const App: React.FC = () => {
     );
   }
 
-  // Ensure default message exists for new users
-  const currentUserSession = sessions[mySessionId] || {
+  // Current session view for the user
+  const currentSession = sessions[mySessionId] || {
     id: mySessionId,
     messages: [{ id: 'init', role: Role.AI, content: "Hello! I am Gemini 4.0. How can I assist you today?", timestamp: Date.now() }],
     isThinking: false,
@@ -149,8 +168,8 @@ const App: React.FC = () => {
 
   return (
     <UserView 
-      messages={currentUserSession.messages}
-      isThinking={currentUserSession.isThinking}
+      messages={currentSession.messages}
+      isThinking={currentSession.isThinking}
       onSendMessage={handleUserSendMessage}
       onTyping={handleUserTyping}
     />
