@@ -13,24 +13,25 @@ export interface Message {
 
 export interface SessionState {
   id: string;
+  userName: string;
   messages: Message[];
   isThinking: boolean;
   isUserTyping: boolean;
   userDraft: string;
   lastActive: number;
-  userName?: string;
+  disconnectedAt?: number;
+  startTime: number;
+  status: 'online' | 'offline';
+  deviceInfo?: string;
 }
 
-export interface GlobalChatState {
-  sessions: Record<string, SessionState>;
-  activeSessionId: string | null;
-}
-
-// Event types for our simulated "API"
 export type ChatEvent = 
-  | { type: 'USER_JOINED'; sessionId: string }
+  | { type: 'USER_JOINED'; sessionId: string; userName: string; deviceInfo: string; startTime: number }
+  | { type: 'USER_PING'; sessionId: string }
   | { type: 'USER_TYPING'; sessionId: string; text: string }
   | { type: 'USER_MESSAGE'; sessionId: string; message: Message }
   | { type: 'AI_THINKING'; sessionId: string; thinking: boolean }
   | { type: 'AI_MESSAGE'; sessionId: string; message: Message }
-  | { type: 'SESSION_PURGE'; sessionId: string };
+  | { type: 'SESSION_PURGE'; sessionId: string }
+  | { type: 'USER_LEFT'; sessionId: string; timestamp: number }
+  | { type: 'REQUEST_MANIFEST' };
