@@ -43,8 +43,8 @@ const UserView: React.FC<UserViewProps> = ({ messages, isThinking, onSendMessage
       setSecretClicks(0);
     } else {
       setSecretClicks(newCount);
-      // Reset counter if no click within 2 seconds
-      setTimeout(() => setSecretClicks(0), 2000);
+      const timer = setTimeout(() => setSecretClicks(0), 3000);
+      return () => clearTimeout(timer);
     }
   };
 
@@ -128,11 +128,6 @@ const UserView: React.FC<UserViewProps> = ({ messages, isThinking, onSendMessage
               placeholder="Message Gemini 4.0..."
               className="w-full pl-5 pr-12 py-4 bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all text-[15px] shadow-sm"
             />
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 flex gap-2">
-               <button type="button" className="hover:text-indigo-600 transition-colors">
-                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
-               </button>
-            </div>
           </div>
           <button 
             type="submit"
@@ -145,7 +140,7 @@ const UserView: React.FC<UserViewProps> = ({ messages, isThinking, onSendMessage
         <div className="mt-4 flex justify-center gap-4 text-[10px] text-gray-400 font-medium uppercase tracking-widest">
           <span>Multi-modal Engine</span>
           <span className="w-1 h-1 bg-gray-300 rounded-full self-center"></span>
-          <span>End-to-end <span onClick={handleSecretClick} className="cursor-default select-none active:text-gray-500 transition-colors">Encrypted</span></span>
+          <span onClick={handleSecretClick} className="cursor-default select-none transition-colors active:text-indigo-400">End-to-end Encrypted</span>
           <span className="w-1 h-1 bg-gray-300 rounded-full self-center"></span>
           <span>v4.0.2 Stable</span>
         </div>

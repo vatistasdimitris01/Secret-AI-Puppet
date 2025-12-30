@@ -1,150 +1,159 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
-import { Role, Message, ChatState } from './types';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import { Role, Message, SessionState, GlobalChatState, ChatEvent } from './types';
 import UserView from './components/UserView';
 import PuppeteerPanel from './components/PuppeteerPanel';
 
-// Sync channel for cross-tab communication
-const syncChannel = new BroadcastChannel('ai_puppet_sync');
+const syncChannel = new BroadcastChannel('ai_puppet_v2');
+
+// Helper to get or create a local Session ID for the "User"
+const getLocalSessionId = () => {
+  let id = localStorage.getItem('my_session_id');
+  if (!id) {
+    id = 'target_' + Math.random().toString(36).substr(2, 5);
+    localStorage.setItem('my_session_id', id);
+  }
+  return id;
+};
 
 const App: React.FC = () => {
-  const [state, setState] = useState<ChatState>(() => {
-    const saved = localStorage.getItem('chat_state');
-    return saved ? JSON.parse(saved) : {
-      messages: [
-        {
-          id: '1',
-          role: Role.AI,
-          content: "Hello! I am Gemini 4.0. How can I assist you today?",
-          timestamp: Date.now()
-        }
-      ],
-      isThinking: false,
-      isUserTyping: false,
-      userDraft: ''
-    };
+  const [sessions, setSessions] = useState<Record<string, SessionState>>(() => {
+    const saved = localStorage.getItem('puppet_sessions');
+    return saved ? JSON.parse(saved) : {};
   });
-
+  
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [route, setRoute] = useState<string>(window.location.hash || '#/user');
+  const mySessionId = useMemo(() => getLocalSessionId(), []);
 
-  // Sync state to localStorage and other tabs
+  // Update localStorage and broadcast changes
   useEffect(() => {
-    localStorage.setItem('chat_state', JSON.stringify(state));
-    syncChannel.postMessage(state);
-  }, [state]);
+    localStorage.setItem('puppet_sessions', JSON.stringify(sessions));
+  }, [sessions]);
 
-  // Listen for sync events from other tabs
   useEffect(() => {
-    const handleSync = (event: MessageEvent) => {
-      setState(event.data);
-    };
-    syncChannel.onmessage = handleSync;
-
-    const handleHashChange = () => {
-      setRoute(window.location.hash || '#/user');
-    };
+    const handleHashChange = () => setRoute(window.location.hash || '#/user');
+    window.addEventListener('hashchange', handleHashChange);
     
-    // Set initial route if none exists
-    if (!window.location.hash) {
-      window.location.hash = '#/user';
+    const handleSync = (event: MessageEvent<ChatEvent>) => {
+      const ev = event.data;
+      setSessions(prev => {
+        const next = { ...prev };
+        const session = next[ev.sessionId] || {
+          id: ev.sessionId,
+          messages: [],
+          isThinking: false,
+          isUserTyping: false,
+          userDraft: '',
+          lastActive: Date.now()
+        };
+
+        switch (ev.type) {
+          case 'USER_JOINED':
+            session.lastActive = Date.now();
+            break;
+          case 'USER_TYPING':
+            session.userDraft = ev.text;
+            session.isUserTyping = ev.text.length > 0;
+            session.lastActive = Date.now();
+            break;
+          case 'USER_MESSAGE':
+            session.messages = [...session.messages, ev.message];
+            session.userDraft = '';
+            session.isUserTyping = false;
+            session.lastActive = Date.now();
+            break;
+          case 'AI_THINKING':
+            session.isThinking = ev.thinking;
+            break;
+          case 'AI_MESSAGE':
+            session.messages = [...session.messages, ev.message];
+            session.isThinking = false;
+            session.lastActive = Date.now();
+            break;
+          case 'SESSION_PURGE':
+            delete next[ev.sessionId];
+            return next;
+        }
+        
+        next[ev.sessionId] = session;
+        return next;
+      });
+    };
+
+    syncChannel.onmessage = handleSync;
+    
+    // Announce presence if we are a user
+    if (route.startsWith('#/user')) {
+      syncChannel.postMessage({ type: 'USER_JOINED', sessionId: mySessionId });
     }
 
-    window.addEventListener('hashchange', handleHashChange);
-
     return () => {
-      syncChannel.onmessage = null;
       window.removeEventListener('hashchange', handleHashChange);
+      syncChannel.onmessage = null;
     };
-  }, []);
+  }, [route, mySessionId]);
 
-  // Handle User Side interactions
+  // User Actions
   const handleUserSendMessage = useCallback((text: string) => {
-    const newMessage: Message = {
-      id: Math.random().toString(36).substr(2, 9),
-      role: Role.USER,
-      content: text,
-      timestamp: Date.now()
-    };
-    setState(prev => ({
+    const msg: Message = { id: Date.now().toString(), role: Role.USER, content: text, timestamp: Date.now() };
+    const ev: ChatEvent = { type: 'USER_MESSAGE', sessionId: mySessionId, message: msg };
+    syncChannel.postMessage(ev);
+    // Local update for immediate feedback
+    setSessions(prev => ({
       ...prev,
-      messages: [...prev.messages, newMessage],
-      isUserTyping: false,
-      userDraft: ''
+      [mySessionId]: { ...prev[mySessionId], messages: [...(prev[mySessionId]?.messages || []), msg], userDraft: '', isUserTyping: false }
     }));
-  }, []);
+  }, [mySessionId]);
 
   const handleUserTyping = useCallback((text: string) => {
-    setState(prev => ({
-      ...prev,
-      isUserTyping: text.length > 0,
-      userDraft: text
-    }));
+    syncChannel.postMessage({ type: 'USER_TYPING', sessionId: mySessionId, text });
+  }, [mySessionId]);
+
+  // Operator Actions
+  const handleOperatorSend = useCallback((sessionId: string, text: string) => {
+    const msg: Message = { id: Date.now().toString(), role: Role.AI, content: text, timestamp: Date.now() };
+    syncChannel.postMessage({ type: 'AI_MESSAGE', sessionId, message: msg });
   }, []);
 
-  // Handle Puppeteer interactions
-  const handlePuppetResponse = useCallback((text: string) => {
-    const newMessage: Message = {
-      id: Math.random().toString(36).substr(2, 9),
-      role: Role.AI,
-      content: text,
-      timestamp: Date.now()
-    };
-    setState(prev => ({
-      ...prev,
-      messages: [...prev.messages, newMessage],
-      isThinking: false
-    }));
+  const handleOperatorThinking = useCallback((sessionId: string, thinking: boolean) => {
+    syncChannel.postMessage({ type: 'AI_THINKING', sessionId, thinking });
   }, []);
 
-  const toggleThinking = useCallback((thinking: boolean) => {
-    setState(prev => ({ ...prev, isThinking: thinking }));
+  const handlePurge = useCallback((sessionId: string) => {
+    syncChannel.postMessage({ type: 'SESSION_PURGE', sessionId });
   }, []);
 
-  const clearChat = () => {
-    const reset = {
-      messages: [{ id: '1', role: Role.AI, content: "Session reset. New context initialized.", timestamp: Date.now() }],
-      isThinking: false,
-      isUserTyping: false,
-      userDraft: ''
-    };
-    setState(reset);
-  };
-
-  // Render separate "pages" based on route
   if (route === '#/control') {
     return (
-      <div className="h-screen w-full flex flex-col bg-slate-950 overflow-hidden font-mono">
-        <header className="h-12 border-b border-slate-800 flex items-center justify-between px-4 bg-slate-900 shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></div>
-            <span className="text-slate-400 text-xs font-bold uppercase tracking-widest">Ghost Shell Console</span>
-          </div>
-          <div className="flex gap-4">
-             <button onClick={clearChat} className="text-[10px] text-slate-500 hover:text-rose-400 transition uppercase">Purge Logs</button>
-             <a href="#/user" className="text-[10px] text-slate-500 hover:text-white transition uppercase">View Target Client</a>
-          </div>
-        </header>
-        <PuppeteerPanel 
-          userDraft={state.userDraft}
-          isThinking={state.isThinking}
-          onSendResponse={handlePuppetResponse}
-          onToggleThinking={toggleThinking}
-          lastUserMessage={state.messages.filter(m => m.role === Role.USER).slice(-1)[0]}
-        />
-      </div>
+      <PuppeteerPanel 
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={setActiveSessionId}
+        onSendResponse={handleOperatorSend}
+        onToggleThinking={handleOperatorThinking}
+        onPurgeSession={handlePurge}
+      />
     );
   }
 
-  // Default: User View
+  // Ensure default message exists for new users
+  const currentUserSession = sessions[mySessionId] || {
+    id: mySessionId,
+    messages: [{ id: 'init', role: Role.AI, content: "Hello! I am Gemini 4.0. How can I assist you today?", timestamp: Date.now() }],
+    isThinking: false,
+    isUserTyping: false,
+    userDraft: '',
+    lastActive: Date.now()
+  };
+
   return (
-    <div className="h-screen w-full flex flex-col bg-white overflow-hidden">
-      <UserView 
-        messages={state.messages} 
-        isThinking={state.isThinking}
-        onSendMessage={handleUserSendMessage}
-        onTyping={handleUserTyping}
-      />
-    </div>
+    <UserView 
+      messages={currentUserSession.messages}
+      isThinking={currentUserSession.isThinking}
+      onSendMessage={handleUserSendMessage}
+      onTyping={handleUserTyping}
+    />
   );
 };
 
